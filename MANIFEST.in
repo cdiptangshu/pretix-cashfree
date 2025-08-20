@@ -1,0 +1,5 @@
+recursive-include pretix_cashfree/static *
+recursive-include pretix_cashfree/templates *
+recursive-include pretix_cashfree/locale *
+include LICENSE
+exclude .gitlab-ci.yml

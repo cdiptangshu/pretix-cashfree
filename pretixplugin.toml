@@ -1,0 +1,5 @@
+[plugin]
+package = "pretix-cashfree"
+modules = [ "pretix_cashfree" ]
+marketplace_name = "cashfree"
+
