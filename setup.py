@@ -2,10 +2,10 @@ from setuptools import setup, find_packages
 
 
 setup(
-    name='pretix-cashfree',
-    version='0.1',
-    description='Cashfree PG',
-    author='Diptangshu Chakrabarty',
+    name="pretix-cashfree",
+    version="0.1",
+    description="Cashfree PG",
+    author="Diptangshu Chakrabarty",
     packages=find_packages(),
     include_package_data=True,
     entry_points={
