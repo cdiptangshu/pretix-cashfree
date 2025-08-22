@@ -13,6 +13,7 @@ maintainers = [
 ]
 
 dependencies = [
+    "cashfree_pg"
 ]
 
 [project.entry-points."pretix.plugin"]
