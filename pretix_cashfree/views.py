@@ -8,6 +8,7 @@ from pretix.base.payment import PaymentException
 from pretix.helpers.http import redirect_to_url
 from pretix.multidomain.urlreverse import eventreverse
 
+from .constants import SESSION_KEY_PAYMENT_ID
 from .payment import CashfreePaymentProvider
 
 logger = logging.getLogger("pretix.plugins.cashfree")
@@ -15,13 +16,13 @@ logger = logging.getLogger("pretix.plugins.cashfree")
 
 @xframe_options_exempt
 def redirect_view(request, *args, **kwargs):
-    pid = request.GET.get("pid", "")
+    payment_session_id = request.GET.get("payment_session_id", "")
 
     r = render(
         request,
         "pretix_cashfree/redirect.html",
         {
-            "payment_session_id": pid,
+            "payment_session_id": payment_session_id,
         },
     )
     r._csp_ignore = True
@@ -33,24 +34,23 @@ def success(request, *args, **kwargs):
     if "cart_namespace" in kwargs:
         urlkwargs["cart_namespace"] = kwargs["cart_namespace"]
 
-    order_id = request.GET.get("oid", "")
+    payment_id = request.GET.get("pid", "")
 
-    logger.debug("orderId: %s", order_id)
-
-    # TODO how to store the payment_cashfree_payment in session from the checkout_prepare() method?
-    if request.session.get("payment_cashfree_payment"):
+    if request.session.get(SESSION_KEY_PAYMENT_ID):
         payment = OrderPayment.objects.get(
-            pk=request.session.get("payment_cashfree_payment")
+            pk=request.session.get(SESSION_KEY_PAYMENT_ID)
         )
     else:
         payment = None
 
-    if order_id == request.session.get("payment_cashfree_oid", None):
+    if payment_id == str(request.session.get(SESSION_KEY_PAYMENT_ID, None)):
         if payment:
             prov = CashfreePaymentProvider(request.event)
+
             try:
-                resp = prov.execute_payment(request, payment)
+                prov.verify_payment(request, payment)
             except PaymentException as e:
+                logger.exception(e)
                 messages.error(request, str(e))
                 urlkwargs["step"] = "payment"
                 return redirect_to_url(
@@ -58,11 +58,11 @@ def success(request, *args, **kwargs):
                         request.event, "presale:event.checkout", kwargs=urlkwargs
                     )
                 )
-            if resp:
-                return resp
     else:
-        messages.error(request, _("Invalid response from Cashfree received."))
-        logger.error("Session did not contain payment_cashfree_oid")
+        messages.error(request, _("Invalid response received from Cashfree"))
+        logger.error(
+            f"The payment_id received from Cashfree does not match the one stored in the session under key '{SESSION_KEY_PAYMENT_ID}'"
+        )
         urlkwargs["step"] = "payment"
         return redirect_to_url(
             eventreverse(request.event, "presale:event.checkout", kwargs=urlkwargs)

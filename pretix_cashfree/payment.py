@@ -16,14 +16,14 @@ from pretix.base.models import Event, Order, OrderPayment
 from pretix.base.payment import BasePaymentProvider, PaymentException
 from pretix.base.settings import SettingsSandbox
 from pretix.multidomain.urlreverse import build_absolute_uri
-from pretix.presale.views.cart import cart_session
 
+from .constants import SESSION_KEY_ORDER_ID, SESSION_KEY_PAYMENT_ID
 from .utils import sanitize_phone
 
 SUPPORTED_CURRENCIES = ["INR"]
 
 logger = logging.getLogger("pretix.plugins.cashfree")
-cashfree_api_version = "2023-08-01"
+x_api_version = "2023-08-01"
 default_client_key = "TEST430329ae80e0f32e41a393d78b923034"
 default_client_secret = "TESTaf195616268bd6202eeb3bf8dc458956e7192a85"
 
@@ -77,121 +77,93 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def payment_is_valid_session(self, request):
         return True
 
-    def checkout_prepare(self, request, cart):
-        logger.debug("in checkout_prepare")
+    def execute_payment(self, request: HttpRequest, payment: OrderPayment):
 
-        # Create Cashfree Order
         self.init_cashfree()
 
-        kwargs = {}
-        if request.resolver_match and "cart_namespace" in request.resolver_match.kwargs:
-            kwargs["cart_namespace"] = request.resolver_match.kwargs["cart_namespace"]
-
-        order_id = str(uuid.uuid4())
-
-        # Store the payment session id in session
-        request.session["payment_cashfree_oid"] = order_id
-
-        return_url = build_absolute_uri(
-            request.event, "plugins:pretix_cashfree:return", kwargs=kwargs
-        ) + "?oid={}".format(order_id)
-
+        payment_id = payment.pk
+        order_id = payment.order.full_code
+        customer_phone = sanitize_phone(payment.order.phone)
+        customer_details = CustomerDetails(
+            customer_id=customer_phone,
+            customer_email=payment.order.email,
+            customer_phone=customer_phone,
+        )
+        return_url = f"{build_absolute_uri(request.event, 'plugins:pretix_cashfree:return')}?pid={payment_id}"
         create_order_request = CreateOrderRequest(
             order_id=order_id,
-            order_amount=float(cart.get("total")),
+            order_amount=float(payment.amount),
             order_currency=self.event.currency,
-            customer_details=self.create_customer_details(request),
+            customer_details=customer_details,
             order_meta=OrderMeta(return_url=return_url),
-            order_note=_("Event tickets for {event}").format(event=request.event.name),
+            order_note=_("{event} tickets").format(event=request.event.name),
         )
+        x_request_id = str(uuid.uuid4())
+
+        request.session[SESSION_KEY_PAYMENT_ID] = payment_id
+        request.session[SESSION_KEY_ORDER_ID] = order_id
 
         try:
             api_response = Cashfree().PGCreateOrder(
-                cashfree_api_version, create_order_request, None, None
+                x_api_version, create_order_request, x_request_id
             )
-            if api_response.data is None:
-                raise Exception("OrderEntity missing in Cashfree API response")
-
-            logger.debug(type(api_response.data))
+            if not (api_response and api_response.data):
+                raise Exception("Cashfree order creation failed")
             order_entity: OrderEntity = api_response.data
             payment_session_id = order_entity.payment_session_id
-
-            # Redirect to Cashfree Hosted Checkout
-            return build_absolute_uri(
-                request.event, "plugins:pretix_cashfree:redirect", kwargs=kwargs
-            ) + "?pid={}".format(payment_session_id)
+            return f"{build_absolute_uri(request.event, 'plugins:pretix_cashfree:redirect')}?payment_session_id={payment_session_id}"
 
         except Exception as e:
-            logger.exception("Error occured: %s", e)
+            logger.exception(e)
             messages.error(
                 request,
                 _("There was an error creating the order. Please try again later."),
             )
-            return False
+            return super().execute_payment(request, payment)
 
-    def create_customer_details(self, request):
+    def verify_payment(self, request: HttpRequest, payment: OrderPayment):
+        self.init_cashfree()
 
-        cs = cart_session(request)
+        order_id = payment.order.full_code
+        if order_id != request.session[SESSION_KEY_ORDER_ID]:
+            raise PaymentException(
+                f"Order id did not match with the one stored in session under key '{SESSION_KEY_ORDER_ID}'"
+            )
 
-        customer_email = cs.get("email")
-        customer_phone = sanitize_phone(cs.get("contact_form_data", {}).get("phone"))
+        try:
+            api_response = Cashfree().PGFetchOrder(x_api_version, order_id)
+            order_entity: OrderEntity = api_response.data
 
-        customer_details = CustomerDetails(
-            customer_id=customer_phone,
-            customer_phone=customer_phone,
-            customer_email=customer_email,
-        )
+            # FIXME Code not correct. Handle exceptions correctly. Also, handle ACTIVE
+            logger.debug(f"Order Entity from Cashfree: {order_entity}")
+            match order_entity.order_status:
+                case "PAID":
+                    if payment.amount == order_entity.order_amount:
+                        payment.confirm()
+                    else:
+                        raise PaymentException(
+                            f"{payment} - Payment amount and order amount did not match"
+                        )
+                case _:
+                    raise PaymentException(
+                        f"{payment} - Cashfree order status {order_entity.order_status} is not handled."
+                    )
 
-        return customer_details
+        except Exception as e:
+            raise PaymentException(
+                f"{payment} - Failed to fetch order details from Cashfree for 'order_id': {order_id}"
+            ) from e
+
+    def payment_prepare(self, request: HttpRequest, payment: OrderPayment):
+        logger.debug("in payment_prepare")
+
+        # TODO Redirect to Cashfree
+        logger.debug("payment full id: %s, pk: %s", payment.full_id, payment.pk)
+        logger.debug("order id: %s", payment.order.full_code)
+
+        return super().payment_prepare(request, payment)
 
     def checkout_confirm_render(
         self, request: HttpRequest, order: Order = None, info_data: dict = None
     ):
         return mark_safe("<p>Cashfree</p>")
-
-    def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        logger.debug("Inside execute_payment")
-
-        order_id = request.session.get("payment_cashfree_oid", "")
-
-        if order_id == "":
-            raise PaymentException(
-                _(
-                    "We were unable to process your payment. See below for details on how to proceed."
-                )
-            )
-
-        self.init_cashfree()
-
-        try:
-
-            api_response = Cashfree().PGFetchOrder(cashfree_api_version, order_id)
-            order_entity: OrderEntity = api_response.data
-
-            logger.debug("order_entity: %s", order_entity)
-
-            # TODO Just for testing, a lot of checks need to happen!
-            order_status = order_entity.order_status
-            if order_status == "PAID":
-                payment.confirm()
-            else:
-                logger.debug("Order Status not handled: %s", order_status)
-
-        except Exception as e:
-            logger.exception("Error occured: %s", e)
-            messages.error(
-                request,
-                _(
-                    "There was an error verifying the payment. Please check the payment status again."
-                ),
-            )
-            return False
-
-        # payment.confirm()
-        return None
-
-    def payment_pending_render(self, request, payment):
-        return super().payment_pending_render(request, payment)
-
-    def order_pending_mail_render(self, order, payment):
-        return super().order_pending_mail_render(order, payment)
