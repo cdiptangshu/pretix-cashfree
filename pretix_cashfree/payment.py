@@ -102,6 +102,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
             order_currency=self.event.currency,
             customer_details=self.create_customer_details(request),
             order_meta=OrderMeta(return_url=return_url),
+            order_note=_("Event tickets for {event}").format(event=request.event.name),
         )
 
         try:
@@ -136,7 +137,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         customer_phone = sanitize_phone(cs.get("contact_form_data", {}).get("phone"))
 
         customer_details = CustomerDetails(
-            customer_id=str(uuid.uuid4()),
+            customer_id=customer_phone,
             customer_phone=customer_phone,
             customer_email=customer_email,
         )
@@ -166,6 +167,8 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
             api_response = Cashfree().PGFetchOrder(cashfree_api_version, order_id)
             order_entity: OrderEntity = api_response.data
+
+            logger.debug("order_entity: %s", order_entity)
 
             # TODO Just for testing, a lot of checks need to happen!
             order_status = order_entity.order_status
