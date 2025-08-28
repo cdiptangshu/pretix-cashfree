@@ -4,11 +4,14 @@ from django.shortcuts import render
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.clickjacking import xframe_options_exempt
 from pretix.base.models import Order, OrderPayment
-from pretix.base.payment import PaymentException
 from pretix.helpers.http import redirect_to_url
 from pretix.multidomain.urlreverse import eventreverse
 
-from .constants import SESSION_KEY_PAYMENT_ID
+from .constants import (
+    REDIRECT_URL_QUERY_PARAM,
+    RETURN_URL_QUERY_PARAM,
+    SESSION_KEY_PAYMENT_ID,
+)
 from .payment import CashfreePaymentProvider
 
 logger = logging.getLogger("pretix.plugins.cashfree")
@@ -16,7 +19,7 @@ logger = logging.getLogger("pretix.plugins.cashfree")
 
 @xframe_options_exempt
 def redirect_view(request, *args, **kwargs):
-    payment_session_id = request.GET.get("payment_session_id", "")
+    payment_session_id = request.GET.get(REDIRECT_URL_QUERY_PARAM, "")
 
     r = render(
         request,
@@ -34,7 +37,7 @@ def success(request, *args, **kwargs):
     if "cart_namespace" in kwargs:
         urlkwargs["cart_namespace"] = kwargs["cart_namespace"]
 
-    payment_id = request.GET.get("pid", "")
+    payment_id = request.GET.get(RETURN_URL_QUERY_PARAM, "")
 
     if request.session.get(SESSION_KEY_PAYMENT_ID):
         payment = OrderPayment.objects.get(
@@ -47,11 +50,14 @@ def success(request, *args, **kwargs):
         if payment:
             prov = CashfreePaymentProvider(request.event)
 
-            try:
-                prov.verify_payment(request, payment)
-            except PaymentException as e:
-                logger.exception(e)
-                messages.error(request, str(e))
+            if not prov.verify_payment(request, payment):
+                logger.error("Failed to process payment with id: %s", payment_id)
+                messages.error(
+                    request,
+                    _(
+                        "Your payment could not be verified. Please contact support for help."
+                    ),
+                )
                 urlkwargs["step"] = "payment"
                 return redirect_to_url(
                     eventreverse(
@@ -61,7 +67,8 @@ def success(request, *args, **kwargs):
     else:
         messages.error(request, _("Invalid response received from Cashfree"))
         logger.error(
-            f"The payment_id received from Cashfree does not match the one stored in the session under key '{SESSION_KEY_PAYMENT_ID}'"
+            "The payment_id received from Cashfree does not match the one stored in the session under key '%s'",
+            SESSION_KEY_PAYMENT_ID,
         )
         urlkwargs["step"] = "payment"
         return redirect_to_url(
