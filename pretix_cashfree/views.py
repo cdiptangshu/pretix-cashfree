@@ -8,8 +8,9 @@ from pretix.helpers.http import redirect_to_url
 from pretix.multidomain.urlreverse import eventreverse
 
 from .constants import (
-    REDIRECT_URL_QUERY_PARAM,
-    RETURN_URL_QUERY_PARAM,
+    REDIRECT_URL_MODE,
+    REDIRECT_URL_PAYMENT_SESSION_ID,
+    RETURN_URL_PID,
     SESSION_KEY_PAYMENT_ID,
 )
 from .payment import CashfreePaymentProvider
@@ -19,13 +20,16 @@ logger = logging.getLogger("pretix.plugins.cashfree")
 
 @xframe_options_exempt
 def redirect_view(request, *args, **kwargs):
-    payment_session_id = request.GET.get(REDIRECT_URL_QUERY_PARAM, "")
+    payment_session_id = request.GET.get(REDIRECT_URL_PAYMENT_SESSION_ID, "")
 
     r = render(
         request,
         "pretix_cashfree/redirect.html",
         {
-            "payment_session_id": payment_session_id,
+            REDIRECT_URL_PAYMENT_SESSION_ID: payment_session_id,
+            REDIRECT_URL_MODE: (
+                "sandbox" if request.event and request.event.testmode else "production"
+            ),
         },
     )
     r._csp_ignore = True
@@ -37,7 +41,7 @@ def success(request, *args, **kwargs):
     if "cart_namespace" in kwargs:
         urlkwargs["cart_namespace"] = kwargs["cart_namespace"]
 
-    payment_id = request.GET.get(RETURN_URL_QUERY_PARAM, "")
+    payment_id = request.GET.get(RETURN_URL_PID, "")
 
     if request.session.get(SESSION_KEY_PAYMENT_ID):
         payment = OrderPayment.objects.get(

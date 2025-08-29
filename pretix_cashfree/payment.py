@@ -18,12 +18,13 @@ from pretix.base.models import Event, Order, OrderPayment
 from pretix.base.payment import BasePaymentProvider, PaymentException
 from pretix.base.settings import SettingsSandbox
 from pretix.multidomain.urlreverse import build_absolute_uri
+from urllib.parse import urlencode
 
 from .constants import (
-    DEFAULT_CLIENT_KEY,
-    DEFAULT_CLIENT_SECRET,
-    REDIRECT_URL_QUERY_PARAM,
-    RETURN_URL_QUERY_PARAM,
+    REDIRECT_URL_PAYMENT_SESSION_ID,
+    RETURN_URL_PID,
+    SANDBOX_CLIENT_KEY,
+    SANDBOX_CLIENT_SECRET,
     SESSION_KEY_PAYMENT_ID,
     SUPPORTED_COUNTRY_CODES,
     SUPPORTED_CURRENCIES,
@@ -72,17 +73,28 @@ class CashfreePaymentProvider(BasePaymentProvider):
         """
         Configure Cashfree API credentials
         """
-        Cashfree.XClientId = self.settings.client_id or DEFAULT_CLIENT_KEY
-        Cashfree.XClientSecret = self.settings.client_secret or DEFAULT_CLIENT_SECRET
-        Cashfree.XEnvironment = Cashfree.XSandbox
+        is_sandbox = self.event.testmode
+        Cashfree.XClientId = (
+            SANDBOX_CLIENT_KEY if is_sandbox else self.settings.client_id
+        )
+        Cashfree.XClientSecret = (
+            SANDBOX_CLIENT_SECRET if is_sandbox else self.settings.client_secret
+        )
+        Cashfree.XEnvironment = (
+            Cashfree.XSandbox if is_sandbox else Cashfree.XProduction
+        )
 
     # ---------------- HELPERS ---------------- #
 
     def _build_redirect_url(self, request: HttpRequest, session_id: str) -> str:
-        return f"{build_absolute_uri(request.event, 'plugins:pretix_cashfree:redirect')}?{REDIRECT_URL_QUERY_PARAM}={session_id}"
+        base_url = build_absolute_uri(request.event, "plugins:pretix_cashfree:redirect")
+        query = urlencode({REDIRECT_URL_PAYMENT_SESSION_ID: session_id})
+        return f"{base_url}?{query}"
 
     def _build_return_url(self, request: HttpRequest, payment: OrderPayment) -> str:
-        return f"{build_absolute_uri(request.event, 'plugins:pretix_cashfree:return')}?{RETURN_URL_QUERY_PARAM}={payment.pk}"
+        base_url = build_absolute_uri(request.event, "plugins:pretix_cashfree:return")
+        query = urlencode({RETURN_URL_PID: payment.pk})
+        return f"{base_url}?{query}"
 
     def _create_cashfree_order_request(
         self, request: HttpRequest, payment: OrderPayment
@@ -230,4 +242,14 @@ class CashfreePaymentProvider(BasePaymentProvider):
     ):
         return mark_safe(
             "<p>You will be redirected to Cashfree to make the payment</p>"
+        )
+
+    def test_mode_message(self):
+        return mark_safe(
+            _(
+                "The Cashfree plugin is operating in test mode. You can use one of <a {args}>many payment modes</a> "
+                "to perform a transaction. No money will actually be transferred."
+            ).format(
+                args='href="https://www.cashfree.com/docs/payments/online/resources/sandbox-environment#sandbox-environment" target="_blank"'
+            )
         )
