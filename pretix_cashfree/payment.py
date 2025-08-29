@@ -1,6 +1,7 @@
 import logging
 import uuid
 from cashfree_pg.api_client import Cashfree
+from cashfree_pg.exceptions import NotFoundException
 from cashfree_pg.models.create_order_request import CreateOrderRequest
 from cashfree_pg.models.customer_details import CustomerDetails
 from cashfree_pg.models.order_entity import OrderEntity
@@ -12,6 +13,7 @@ from django.contrib import messages
 from django.http import HttpRequest
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
+from phonenumbers import PhoneNumber
 from pretix.base.models import Event, Order, OrderPayment
 from pretix.base.payment import BasePaymentProvider, PaymentException
 from pretix.base.settings import SettingsSandbox
@@ -23,11 +25,10 @@ from .constants import (
     REDIRECT_URL_QUERY_PARAM,
     RETURN_URL_QUERY_PARAM,
     SESSION_KEY_PAYMENT_ID,
+    SUPPORTED_COUNTRY_CODES,
+    SUPPORTED_CURRENCIES,
     X_API_VERSION,
 )
-from .utils import sanitize_phone
-
-SUPPORTED_CURRENCIES = ["INR"]
 
 logger = logging.getLogger("pretix.plugins.cashfree")
 
@@ -86,11 +87,28 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def _create_cashfree_order_request(
         self, request: HttpRequest, payment: OrderPayment
     ) -> CreateOrderRequest:
-        customer_phone = sanitize_phone(payment.order.phone)
+        phone: PhoneNumber = payment.order.phone
+
+        if (
+            not phone
+            or phone.country_code not in SUPPORTED_COUNTRY_CODES
+            or len(str(phone.national_number)) != 10
+        ):
+            messages.error(
+                request,
+                _(
+                    f"Invalid phone number - {phone}. Please enter a valid Indian number with the country code (+91) followed by 10 digits."
+                ),
+            )
+            raise Exception(
+                "Phone number %s, is currently not supported by the Cashfree Python SDK",
+                phone,
+            )
+
         customer_details = CustomerDetails(
-            customer_id=customer_phone,
+            customer_id=str(phone.national_number),
             customer_email=payment.order.email,
-            customer_phone=customer_phone,
+            customer_phone=str(phone.national_number),
         )
 
         return CreateOrderRequest(
@@ -99,32 +117,10 @@ class CashfreePaymentProvider(BasePaymentProvider):
             order_currency=self.event.currency,
             customer_details=customer_details,
             order_meta=OrderMeta(return_url=self._build_return_url(request, payment)),
-            order_note=_(f"{request.event.name} tickets"),
+            order_note=f"{request.event.name} tickets",
         )
 
-    # ---------------- PAYMENT FLOW ---------------- #
-
-    def is_allowed(self, request: HttpRequest, total: Decimal = None) -> bool:
-        return (
-            super().is_allowed(request, total)
-            and self.event.currency in SUPPORTED_CURRENCIES
-        )
-
-    def payment_is_valid_session(self, request):
-        return True
-
-    def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        """
-        Redirect to Cashfree to collect payment
-        """
-        # First check existing payment status
-        order_entity = self.verify_payment(request, payment)
-        if order_entity:
-            if payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED:
-                return super().execute_payment(request, payment)
-            return self._build_redirect_url(request, order_entity.payment_session_id)
-
-        # Otherwise create a new Cashfree order
+    def _create_cashfree_order(self, request, payment):
         self.init_cashfree()
         request.session[SESSION_KEY_PAYMENT_ID] = payment.pk
 
@@ -150,6 +146,59 @@ class CashfreePaymentProvider(BasePaymentProvider):
             )
             raise PaymentException from e
 
+    def _handle_cashfree_order_status(self, payment, order_entity):
+        match order_entity.order_status:
+            case "ACTIVE":
+                logger.debug("Order has no successful transaction yet")
+            case "PAID":
+                logger.debug("Order is PAID")
+                if payment.amount == order_entity.order_amount:
+                    payment.confirm()
+                else:
+                    raise PaymentException(f"{payment} - Amount mismatch with Cashfree")
+            case "EXPIRED" | "TERMINATED":
+                logger.debug("Order expired or terminated")
+                payment.fail()
+            case "TERMINATION_REQUESTED":
+                logger.debug("Order termination requested")
+
+    def _is_payment_confirmed(self, payment):
+        return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
+
+    # ---------------- PAYMENT FLOW ---------------- #
+
+    def is_allowed(self, request: HttpRequest, total: Decimal = None) -> bool:
+        return (
+            super().is_allowed(request, total)
+            and self.event.currency in SUPPORTED_CURRENCIES
+        )
+
+    def payment_is_valid_session(self, request):
+        return True
+
+    def execute_payment(self, request: HttpRequest, payment: OrderPayment):
+        """
+        Redirect to Cashfree to collect payment
+        """
+        next_page = super().execute_payment(request, payment)
+
+        # If already confirmed, go to order details
+        if self._is_payment_confirmed(payment):
+            return next_page
+
+        # First check existing payment status
+        order_entity = self.verify_payment(request, payment)
+        if order_entity:
+            # If confirmed, go to order details. Otherwise redirect to Cashfree with existing payment_session_id
+            return (
+                next_page
+                if self._is_payment_confirmed(payment)
+                else self._build_redirect_url(request, order_entity.payment_session_id)
+            )
+
+        # Otherwise create a new Cashfree order and redirect
+        return self._create_cashfree_order(request, payment)
+
     def verify_payment(self, request: HttpRequest, payment: OrderPayment):
         """
         Verify existing Cashfree order status and update payment accordingly
@@ -163,28 +212,18 @@ class CashfreePaymentProvider(BasePaymentProvider):
             order_entity: OrderEntity = api_response.data
 
             logger.debug("Order Entity from Cashfree: %s", order_entity)
-            match order_entity.order_status:
-                case "ACTIVE":
-                    logger.debug("Order has no successful transaction yet")
-                case "PAID":
-                    logger.debug("Order is PAID")
-                    if payment.amount == order_entity.order_amount:
-                        payment.confirm()
-                    else:
-                        raise PaymentException(
-                            f"{payment} - Amount mismatch with Cashfree"
-                        )
-                case "EXPIRED" | "TERMINATED":
-                    logger.debug("Order expired or terminated")
-                    payment.fail()
-                case "TERMINATION_REQUESTED":
-                    logger.debug("Order termination requested")
+            self._handle_cashfree_order_status(payment, order_entity)
 
             return order_entity
 
-        except Exception as e:
-            logger.exception("Error verifying Cashfree order: %s", e)
+        except NotFoundException:
+            logger.debug("Cashfree order not found for payment: %s", payment)
             return None
+        except Exception as e:
+            logger.exception(
+                "Error occured while fetching Cashfree order having id: %s", order_id
+            )
+            raise PaymentException from e
 
     def checkout_confirm_render(
         self, request: HttpRequest, order: Order = None, info_data: dict = None
