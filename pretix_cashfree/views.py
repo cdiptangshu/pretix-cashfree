@@ -1,8 +1,13 @@
+import json
 import logging
 from django.contrib import messages
+from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django_scopes import scopes_disabled
 from pretix.base.models import Order, OrderPayment
 from pretix.helpers.http import redirect_to_url
 from pretix.multidomain.urlreverse import eventreverse
@@ -36,7 +41,7 @@ def redirect_view(request, *args, **kwargs):
     return r
 
 
-def success(request, *args, **kwargs):
+def return_view(request, *args, **kwargs):
     urlkwargs = {}
     if "cart_namespace" in kwargs:
         urlkwargs["cart_namespace"] = kwargs["cart_namespace"]
@@ -95,5 +100,12 @@ def success(request, *args, **kwargs):
         )
 
 
-def abort(request, *args, **kwargs):
-    raise Exception("Not implemented yet!")
+@csrf_exempt
+@require_POST
+@scopes_disabled()
+def webhook_view(request, *args, **kwargs):
+    event_body = request.body.decode("utf-8").strip()
+    event_json = json.loads(event_body)
+    logger.debug("webhook called: %s", event_json)
+
+    return HttpResponse(status=200)

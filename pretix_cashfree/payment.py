@@ -11,12 +11,14 @@ from decimal import Decimal
 from django import forms
 from django.contrib import messages
 from django.http import HttpRequest
+from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from phonenumbers import PhoneNumber
 from pretix.base.models import Event, Order, OrderPayment
 from pretix.base.payment import BasePaymentProvider, PaymentException
 from pretix.base.settings import SettingsSandbox
+from pretix.helpers.urls import build_absolute_uri as build_global_uri
 from pretix.multidomain.urlreverse import build_absolute_uri
 from urllib.parse import urlencode
 
@@ -63,6 +65,16 @@ class CashfreePaymentProvider(BasePaymentProvider):
                     widget=forms.PasswordInput(render_value=True),
                 ),
             ),
+            (
+                "debug_tunnel",
+                forms.URLField(
+                    label=_("Debug Webhook Tunnel"),
+                    required=False,
+                    help_text=_(
+                        "If provided, this will be used as the base URL for notify webhook"
+                    ),
+                ),
+            ),
         ]
 
         return OrderedDict(list(super().settings_form_fields.items()) + fields)
@@ -96,6 +108,13 @@ class CashfreePaymentProvider(BasePaymentProvider):
         query = urlencode({RETURN_URL_PID: payment.pk})
         return f"{base_url}?{query}"
 
+    def _build_notify_url(self, request: HttpRequest) -> str:
+        return (
+            f"{self.settings.debug_tunnel}{reverse('plugins:pretix_cashfree:webhook')}"
+            if self.settings.debug_tunnel
+            else build_global_uri("plugins:pretix_cashfree:webhook")
+        )
+
     def _create_cashfree_order_request(
         self, request: HttpRequest, payment: OrderPayment
     ) -> CreateOrderRequest:
@@ -128,7 +147,10 @@ class CashfreePaymentProvider(BasePaymentProvider):
             order_amount=float(payment.amount),
             order_currency=self.event.currency,
             customer_details=customer_details,
-            order_meta=OrderMeta(return_url=self._build_return_url(request, payment)),
+            order_meta=OrderMeta(
+                return_url=self._build_return_url(request, payment),
+                notify_url=self._build_notify_url(request),
+            ),
             order_note=f"{request.event.name} tickets",
         )
 
@@ -236,6 +258,8 @@ class CashfreePaymentProvider(BasePaymentProvider):
                 "Error occured while fetching Cashfree order having id: %s", order_id
             )
             raise PaymentException from e
+
+    # ---------------- RENDERING ---------------- #
 
     def checkout_confirm_render(
         self, request: HttpRequest, order: Order = None, info_data: dict = None
