@@ -138,7 +138,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
         customer_details = CustomerDetails(
             customer_id=str(phone.national_number),
-            customer_name=payment.order.customer.name,
             customer_email=payment.order.email,
             customer_phone=str(phone.national_number),
         )
