@@ -1,7 +1,7 @@
 [project]
 name = "pretix-cashfree"
 dynamic = ["version"]
-description = "Cashfree PG"
+description = "Cashfree Payment Gateway"
 readme = "README.rst"
 license = {text = "Apache"}
 keywords = ["pretix"]
@@ -13,6 +13,7 @@ maintainers = [
 ]
 
 dependencies = [
+    "cashfree_pg"
 ]
 
 [project.entry-points."pretix.plugin"]

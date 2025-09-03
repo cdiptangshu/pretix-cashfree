@@ -1,0 +1,49 @@
+{% load compress %}
+{% load i18n %}
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ settings.PRETIX_INSTANCE_NAME }}</title>
+    {% compress css %}
+        <link rel="stylesheet" type="text/x-scss" href="{% static "pretixbase/scss/cachedfiles.scss" %}"/>
+    {% endcompress %}
+    {% compress js %}
+        <script type="text/javascript" src="{% static "jquery/js/jquery-3.6.4.min.js" %}"></script>
+    {% endcompress %}
+    <script type="text/javascript" src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h2>{% trans "You are being redirected to the Cashfree payment page..." %}</h2>
+        <p>{% trans "If you are not redirected automatically, click the button below" %}</p>
+        <button id="redirectBtn" class="btn btn-primary btn-lg">Pay Now</button>        
+    </div>
+    <script>
+        const cashfree = Cashfree({
+            mode: "{{ mode }}",
+        });
+
+        $(document).ready(() => {
+            function doRedirect() {
+                let checkoutOptions = {
+                    paymentSessionId: "{{ payment_session_id }}",
+                    redirectTarget: "_self",
+                };
+                cashfree.checkout(checkoutOptions);
+            }
+
+            // Auto redirect after 3 seconds
+            setTimeout(doRedirect, 3000);
+
+            // Manual redirect on button click
+            $("#redirectBtn").on("click", (event) => {
+                event.preventDefault();
+                doRedirect();
+            });
+        });                
+    </script>
+</body>
+</html>
