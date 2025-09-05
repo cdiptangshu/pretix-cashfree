@@ -1,23 +1,24 @@
 import json
 import logging
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django_scopes import scopes_disabled
-from pretix.base.models import Order, OrderPayment
+from pretix.base.models import Order
 from pretix.helpers.http import redirect_to_url
 from pretix.multidomain.urlreverse import eventreverse
 
 from .constants import (
     REDIRECT_URL_MODE,
     REDIRECT_URL_PAYMENT_SESSION_ID,
-    RETURN_URL_PID,
-    SESSION_KEY_PAYMENT_ID,
+    RETURN_URL_PARAM,
+    SESSION_KEY_ORDER_ID,
 )
+from .models import ReferencedCashfreeObject
 from .payment import CashfreePaymentProvider
 
 logger = logging.getLogger("pretix.plugins.cashfree")
@@ -46,21 +47,22 @@ def return_view(request, *args, **kwargs):
     if "cart_namespace" in kwargs:
         urlkwargs["cart_namespace"] = kwargs["cart_namespace"]
 
-    payment_id = request.GET.get(RETURN_URL_PID, "")
+    order_id = request.GET.get(RETURN_URL_PARAM, "")
 
-    if request.session.get(SESSION_KEY_PAYMENT_ID):
-        payment = OrderPayment.objects.get(
-            pk=request.session.get(SESSION_KEY_PAYMENT_ID)
+    if request.session.get(SESSION_KEY_ORDER_ID):
+        cashfree_object = ReferencedCashfreeObject.objects.get(
+            reference=request.session.get(SESSION_KEY_ORDER_ID)
         )
+        payment = cashfree_object.payment
     else:
         payment = None
 
-    if payment_id == str(request.session.get(SESSION_KEY_PAYMENT_ID, None)):
+    if order_id == str(request.session.get(SESSION_KEY_ORDER_ID, None)):
         if payment:
             prov = CashfreePaymentProvider(request.event)
 
-            if not prov.verify_payment(request, payment):
-                logger.error("Failed to process payment with id: %s", payment_id)
+            if not prov.verify_payment(payment):
+                logger.error("Failed to process payment with id: %s", order_id)
                 messages.error(
                     request,
                     _(
@@ -77,7 +79,7 @@ def return_view(request, *args, **kwargs):
         messages.error(request, _("Invalid response received from Cashfree"))
         logger.error(
             "The payment_id received from Cashfree does not match the one stored in the session under key '%s'",
-            SESSION_KEY_PAYMENT_ID,
+            SESSION_KEY_ORDER_ID,
         )
         urlkwargs["step"] = "payment"
         return redirect_to_url(
@@ -103,9 +105,44 @@ def return_view(request, *args, **kwargs):
 @csrf_exempt
 @require_POST
 @scopes_disabled()
-def webhook_view(request, *args, **kwargs):
-    event_body = request.body.decode("utf-8").strip()
-    event_json = json.loads(event_body)
-    logger.debug("webhook called: %s", event_json)
+def webhook_view(request: HttpRequest, *args, **kwargs):
+
+    try:
+        event_body = request.body.decode("utf-8").strip()
+        event_json = json.loads(event_body)
+        timestamp = request.headers["x-webhook-timestamp"]
+        signature = request.headers["x-webhook-signature"]
+    except Exception as e:
+        logger.exception("Failed to parse webhook payload: %s", e)
+        return HttpResponse(status=400)
+
+    order_id = str(event_json.get("data", {}).get("order", {}).get("order_id", ""))
+
+    if not order_id:
+        logger.warning("Webhook payloads missing order_id: %s", event_json)
+        return HttpResponse(status=400)
+
+    try:
+        cashfree_object = ReferencedCashfreeObject.objects.get(reference=order_id)
+        prov = CashfreePaymentProvider(cashfree_object.payment.order.event)
+
+    except ReferencedCashfreeObject.DoesNotExist:
+        logger.warning("No ReferencedCashfreeObject found for order_id=%s", order_id)
+        return HttpResponse(status=404)
+    except Exception as e:
+        logger.exception("Error while fetching ReferencedCashfreeObject: %s", e)
+        return HttpResponse(status=500)
+
+    try:
+        logger.debug("Handling webhook for payment: %s", cashfree_object.payment)
+        prov.handle_webhook(
+            raw_payload=event_body,
+            signature=signature,
+            timestamp=timestamp,
+            payment=cashfree_object.payment,
+        )
+    except Exception as e:
+        logger.warning("Failed to handle webhook payload: %s", e)
+        return HttpResponse(status=404)
 
     return HttpResponse(status=200)
