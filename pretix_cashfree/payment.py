@@ -274,7 +274,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         """
         Verifies the signature, performs idempotency check, and processes the payment webhook payload
         """
-        
+
         logger.debug("Verifying webhook signature")
 
         # Verify signature
