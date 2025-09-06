@@ -45,6 +45,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def __init__(self, event: Event):
         super().__init__(event)
         self.settings = SettingsSandbox("payment", "cashfree", event)
+        self.init_cashfree()
 
     # ---------------- SETTINGS ---------------- #
 
@@ -159,7 +160,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         )
 
     def _create_cashfree_order(self, request, payment: OrderPayment):
-        self.init_cashfree()
 
         try:
             logger.debug("Creating Cashfree order for : %s", payment)
@@ -251,7 +251,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         """
         Verify existing Cashfree order status and update payment accordingly
         """
-        self.init_cashfree()
+
         order_id = payment.order.full_code
 
         try:
@@ -274,7 +274,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         """
         Verifies the signature, performs idempotency check, and processes the payment webhook payload
         """
-        self.init_cashfree()
+        
         logger.debug("Verifying webhook signature")
 
         # Verify signature
@@ -292,10 +292,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
             logger.debug("webhook type is %s, skipping", webhook_response.type)
             return
 
-        # TODO process the webhook response
         self.verify_payment(payment)
-
-        # process_webhook.apply_async(args=[webhook_response.object])
 
     # ---------------- RENDERING ---------------- #
 
