@@ -17,8 +17,9 @@ from .constants import (
     REDIRECT_URL_PAYMENT_SESSION_ID,
     RETURN_URL_PARAM,
     SESSION_KEY_ORDER_ID,
+    WEBHOOK_TYPE_PAYMENT,
 )
-from .models import ReferencedCashfreeObject
+from .models import PaymentAttempt
 from .payment import CashfreePaymentProvider
 
 logger = logging.getLogger("pretix.plugins.cashfree")
@@ -50,8 +51,8 @@ def return_view(request, *args, **kwargs):
     order_id = request.GET.get(RETURN_URL_PARAM, "")
 
     if request.session.get(SESSION_KEY_ORDER_ID):
-        cashfree_object = ReferencedCashfreeObject.objects.get(
-            reference=request.session.get(SESSION_KEY_ORDER_ID)
+        cashfree_object = PaymentAttempt.objects.get(
+            order_id=request.session.get(SESSION_KEY_ORDER_ID)
         )
         payment = cashfree_object.payment
     else:
@@ -116,17 +117,22 @@ def webhook_view(request: HttpRequest, *args, **kwargs):
         logger.exception("Failed to parse webhook payload: %s", e)
         return HttpResponse(status=400)
 
-    order_id = str(event_json.get("data", {}).get("order", {}).get("order_id", ""))
+    order_id = str(event_json["data"]["order"]["order_id"])
+    type = event_json["type"]
+
+    if type != WEBHOOK_TYPE_PAYMENT:
+        logger.debug("webhook type: %s, aborting", type)
+        return HttpResponse(status=200)
 
     if not order_id:
         logger.warning("Webhook payloads missing order_id: %s", event_json)
         return HttpResponse(status=400)
 
     try:
-        cashfree_object = ReferencedCashfreeObject.objects.get(reference=order_id)
+        cashfree_object = PaymentAttempt.objects.get(order_id=order_id)
         prov = CashfreePaymentProvider(cashfree_object.payment.order.event)
 
-    except ReferencedCashfreeObject.DoesNotExist:
+    except PaymentAttempt.DoesNotExist:
         logger.warning("No ReferencedCashfreeObject found for order_id=%s", order_id)
         return HttpResponse(status=404)
     except Exception as e:
@@ -142,7 +148,7 @@ def webhook_view(request: HttpRequest, *args, **kwargs):
             payment=cashfree_object.payment,
         )
     except Exception as e:
-        logger.warning("Failed to handle webhook payload: %s", e)
+        logger.warning("Error occured while processing webhook: %s", e)
         return HttpResponse(status=404)
 
     return HttpResponse(status=200)

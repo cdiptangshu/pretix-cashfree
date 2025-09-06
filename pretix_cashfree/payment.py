@@ -1,6 +1,6 @@
 import logging
 import uuid
-from cashfree_pg.api_client import Cashfree
+from cashfree_pg.api_client import Cashfree, PGWebhookEvent
 from cashfree_pg.exceptions import NotFoundException
 from cashfree_pg.models.create_order_request import CreateOrderRequest
 from cashfree_pg.models.customer_details import CustomerDetails
@@ -10,6 +10,7 @@ from collections import OrderedDict
 from decimal import Decimal
 from django import forms
 from django.contrib import messages
+from django.db.utils import IntegrityError
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.safestring import mark_safe
@@ -23,6 +24,7 @@ from pretix.multidomain.urlreverse import build_absolute_uri
 from urllib.parse import urlencode
 
 from .constants import (
+    PAYMENT_STATUS_SUCCESS,
     REDIRECT_URL_PAYMENT_SESSION_ID,
     RETURN_URL_PARAM,
     SANDBOX_CLIENT_KEY,
@@ -32,7 +34,7 @@ from .constants import (
     SUPPORTED_CURRENCIES,
     X_API_VERSION,
 )
-from .models import ReferencedCashfreeObject
+from .models import PaymentAttempt, PaymentWebhookEvent
 
 logger = logging.getLogger("pretix.plugins.cashfree")
 
@@ -187,8 +189,8 @@ class CashfreePaymentProvider(BasePaymentProvider):
     ):
         logger.debug("Redirecting to Cashfree for payment: %s", payment)
         request.session[SESSION_KEY_ORDER_ID] = order_entity.order_id
-        ReferencedCashfreeObject.objects.update_or_create(
-            reference=order_entity.order_id, defaults={"payment": payment}
+        PaymentAttempt.objects.update_or_create(
+            order_id=order_entity.order_id, defaults={"payment": payment}
         )
         return self._build_redirect_url(request, order_entity.payment_session_id)
 
@@ -212,6 +214,44 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
     def _is_payment_confirmed(self, payment):
         return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
+
+    def _verify_webhook_signature(self, signature, timestamp, raw_payload):
+        try:
+            webhook_response = Cashfree().PGVerifyWebhookSignature(
+                signature=signature, timestamp=timestamp, rawBody=raw_payload
+            )
+        except Exception as e:
+            logger.Error("Error: %s", e)
+            return None
+
+        return webhook_response
+
+    def _check_webhook_payload(
+        self, payment: OrderPayment, webhook_event: PGWebhookEvent
+    ):
+        # Check idempotency using cf_payment_id
+        cf_payment_obj = webhook_event.object["data"]["payment"]
+        cf_payment_id = str(cf_payment_obj["cf_payment_id"])
+        payment_status = cf_payment_obj["payment_status"]
+
+        try:
+            # Log the webhook event
+            PaymentWebhookEvent.objects.create(
+                cf_payment_id=cf_payment_id,
+                order_code=payment.order.code,
+                payment_local_id=payment.local_id,
+                payment_status=payment_status,
+                payload=webhook_event.raw,
+            )
+        except IntegrityError:
+            logger.debug(
+                "Webhook already processed with cf_payment_id: %s, aborting.",
+                cf_payment_id,
+            )
+            return False
+
+        # Verify the payment if Cashfree reports it as successful
+        return payment_status == PAYMENT_STATUS_SUCCESS
 
     # ---------------- PAYMENT FLOW ---------------- #
 
@@ -271,28 +311,15 @@ class CashfreePaymentProvider(BasePaymentProvider):
             raise PaymentException from e
 
     def handle_webhook(self, raw_payload, signature, timestamp, payment: OrderPayment):
-        """
-        Verifies the signature, performs idempotency check, and processes the payment webhook payload
-        """
-
-        logger.debug("Verifying webhook signature")
-
-        # Verify signature
-        try:
-            webhook_response = Cashfree().PGVerifyWebhookSignature(
-                signature=signature, timestamp=timestamp, rawBody=raw_payload
+        webhook_event = self._verify_webhook_signature(
+            signature=signature, timestamp=timestamp, raw_payload=raw_payload
+        )
+        if not webhook_event:
+            raise Exception(
+                "Could not verify webhook signature of payment: %s", payment
             )
-        except Exception as e:
-            logger.warning("Failed to verify webhook signature: %s", e)
-            raise
-
-        # TODO check idempotency using cf_payment_id
-
-        if webhook_response.type != "PAYMENT_SUCCESS_WEBHOOK":
-            logger.debug("webhook type is %s, skipping", webhook_response.type)
-            return
-
-        self.verify_payment(payment)
+        if self._check_webhook_payload(payment=payment, webhook_event=webhook_event):
+            self.verify_payment(payment)
 
     # ---------------- RENDERING ---------------- #
 
