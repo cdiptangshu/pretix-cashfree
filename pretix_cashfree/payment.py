@@ -55,8 +55,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         self.settings = SettingsSandbox("payment", "cashfree", event)
         self.init_cashfree()
 
-    # ---------------- SETTINGS ---------------- #
-
     @property
     def settings_form_fields(self):
         fields = [
@@ -93,8 +91,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def payment_phone_session_key(self):
         return f"payment_{self.identifier}_phone"
 
-    # ---------------- INITIALIZATION ---------------- #
-
     def init_cashfree(self):
         """
         Configure Cashfree API credentials
@@ -110,8 +106,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         Cashfree.XEnvironment = (
             Cashfree.XSandbox if is_sandbox else Cashfree.XProduction
         )
-
-    # ---------------- HELPERS ---------------- #
 
     def _build_redirect_url(self, request: HttpRequest, session_id: str) -> str:
         base_url = build_absolute_uri(request.event, "plugins:pretix_cashfree:redirect")
@@ -248,8 +242,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         # Verify the payment if Cashfree reports it as successful
         return payment_status == PAYMENT_STATUS_SUCCESS
 
-    # ---------------- PAYMENT FLOW ---------------- #
-
     def is_allowed(self, request: HttpRequest, total: Decimal = None) -> bool:
         return (
             super().is_allowed(request, total)
@@ -336,13 +328,11 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
         return True
 
-    # ---------------- RENDERING ---------------- #
-
     def checkout_confirm_render(
         self, request: HttpRequest, order: Order = None, info_data: dict = None
     ):
         return mark_safe(
-            "<p>You will be redirected to Cashfree to make the payment</p>"
+            f"<p>Payment Phone: {request.session[self.payment_phone_session_key]}</p><p>You will be redirected to Cashfree to make the payment</p>"
         )
 
     def test_mode_message(self):
@@ -356,10 +346,15 @@ class CashfreePaymentProvider(BasePaymentProvider):
         )
 
     def payment_form_render(self, request, total, order: Order = None):
+
         phone = (
-            next(iter((request.session.get("carts") or {}).values()), {})
-            .get("contact_form_data", {})
-            .get("phone")
+            str(order.phone)
+            if order
+            else (
+                next(iter((request.session.get("carts") or {}).values()), {})
+                .get("contact_form_data", {})
+                .get("phone")
+            )
         )
         phone_prefix = guess_phone_prefix_from_request(request, self.event)
         request.session[self.payment_phone_session_key] = (
