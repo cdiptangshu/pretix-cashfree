@@ -15,10 +15,16 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
-from phonenumbers import PhoneNumber
+from phonenumber_field.formfields import PhoneNumberField
+from phonenumber_field.phonenumber import PhoneNumber
+from pretix.base.forms.questions import (
+    WrappedPhoneNumberPrefixWidget,
+    guess_phone_prefix_from_request,
+)
 from pretix.base.models import Event, Order, OrderPayment
 from pretix.base.payment import BasePaymentProvider, PaymentException
 from pretix.base.settings import SettingsSandbox
+from pretix.base.templatetags.rich_text import rich_text
 from pretix.helpers.urls import build_absolute_uri as build_global_uri
 from pretix.multidomain.urlreverse import build_absolute_uri
 from urllib.parse import urlencode
@@ -48,8 +54,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         super().__init__(event)
         self.settings = SettingsSandbox("payment", "cashfree", event)
         self.init_cashfree()
-
-    # ---------------- SETTINGS ---------------- #
 
     @property
     def settings_form_fields(self):
@@ -83,7 +87,9 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
         return OrderedDict(list(super().settings_form_fields.items()) + fields)
 
-    # ---------------- INITIALIZATION ---------------- #
+    @property
+    def payment_phone_session_key(self):
+        return f"payment_{self.identifier}_phone"
 
     def init_cashfree(self):
         """
@@ -100,8 +106,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         Cashfree.XEnvironment = (
             Cashfree.XSandbox if is_sandbox else Cashfree.XProduction
         )
-
-    # ---------------- HELPERS ---------------- #
 
     def _build_redirect_url(self, request: HttpRequest, session_id: str) -> str:
         base_url = build_absolute_uri(request.event, "plugins:pretix_cashfree:redirect")
@@ -123,23 +127,8 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def _create_cashfree_order_request(
         self, request: HttpRequest, payment: OrderPayment
     ) -> CreateOrderRequest:
-        phone: PhoneNumber = payment.order.phone
 
-        if (
-            not phone
-            or phone.country_code not in SUPPORTED_COUNTRY_CODES
-            or len(str(phone.national_number)) != 10
-        ):
-            messages.error(
-                request,
-                _(
-                    f"Invalid phone number - {phone}. Please enter a valid Indian number with the country code (+91) followed by 10 digits."
-                ),
-            )
-            raise Exception(
-                "Phone number %s, is currently not supported by the Cashfree Python SDK",
-                phone,
-            )
+        phone: PhoneNumber = request.session[self.payment_phone_session_key]
 
         customer_phone = str(phone.national_number)
         customer_details = CustomerDetails(
@@ -253,8 +242,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         # Verify the payment if Cashfree reports it as successful
         return payment_status == PAYMENT_STATUS_SUCCESS
 
-    # ---------------- PAYMENT FLOW ---------------- #
-
     def is_allowed(self, request: HttpRequest, total: Decimal = None) -> bool:
         return (
             super().is_allowed(request, total)
@@ -321,13 +308,31 @@ class CashfreePaymentProvider(BasePaymentProvider):
         if self._check_webhook_payload(payment=payment, webhook_event=webhook_event):
             self.verify_payment(payment)
 
-    # ---------------- RENDERING ---------------- #
+    def checkout_prepare(self, request, cart):
+        # HACK The following method validats payment form and copies the form values to the session.
+        if not super().checkout_prepare(request, cart):
+            return False
+
+        phone: PhoneNumber = request.session[self.payment_phone_session_key]
+
+        is_valid_country = phone.country_code in SUPPORTED_COUNTRY_CODES
+        is_valid_length = len(str(phone.national_number)) == 10
+        valid = is_valid_country and is_valid_length
+
+        if not valid:
+            messages.error(
+                request,
+                _("Please provide a number with +91 extension followed by 10 digits."),
+            )
+            return False
+
+        return True
 
     def checkout_confirm_render(
         self, request: HttpRequest, order: Order = None, info_data: dict = None
     ):
         return mark_safe(
-            "<p>You will be redirected to Cashfree to make the payment</p>"
+            f"<p>Payment Phone: {request.session[self.payment_phone_session_key]}</p><p>You will be redirected to Cashfree to make the payment</p>"
         )
 
     def test_mode_message(self):
@@ -339,3 +344,39 @@ class CashfreePaymentProvider(BasePaymentProvider):
                 args='href="https://www.cashfree.com/docs/payments/online/resources/sandbox-environment#sandbox-environment" target="_blank"'
             )
         )
+
+    def payment_form_render(self, request, total, order: Order = None):
+
+        phone = (
+            str(order.phone)
+            if order
+            else (
+                next(iter((request.session.get("carts") or {}).values()), {})
+                .get("contact_form_data", {})
+                .get("phone")
+            )
+        )
+        phone_prefix = guess_phone_prefix_from_request(request, self.event)
+        request.session[self.payment_phone_session_key] = (
+            PhoneNumber().from_string(phone)
+            if phone
+            else "+{}.".format(phone_prefix) if phone_prefix else None
+        )
+        return super().payment_form_render(request, total, order)
+
+    @property
+    def payment_form_fields(self):
+        logger.debug("payment_form_fields() called")
+        fields = [
+            (
+                "phone",
+                PhoneNumberField(
+                    label=_("Phone number"),
+                    required=True,
+                    help_text=rich_text(self.event.settings.checkout_phone_helptext),
+                    widget=WrappedPhoneNumberPrefixWidget(),
+                ),
+            )
+        ]
+
+        return OrderedDict(fields)
