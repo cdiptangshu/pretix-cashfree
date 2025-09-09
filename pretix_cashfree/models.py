@@ -25,3 +25,8 @@ class PaymentWebhookEvent(models.Model):
 class CashfreePaymentInfo(BaseModel):
     x_request_id: str
     order_id: str
+    order_status: str
+    order_amount: float
+    order_currency: str
+    customer_id: str
+    updated_at: str
