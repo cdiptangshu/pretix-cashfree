@@ -1,6 +1,5 @@
 import logging
 import uuid
-import json
 from cashfree_pg.api_client import Cashfree, PGWebhookEvent
 from cashfree_pg.exceptions import NotFoundException
 from cashfree_pg.models.create_order_request import CreateOrderRequest
@@ -13,6 +12,7 @@ from django import forms
 from django.contrib import messages
 from django.db.utils import IntegrityError
 from django.http import HttpRequest
+from django.template.loader import get_template
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -29,7 +29,6 @@ from pretix.base.templatetags.rich_text import rich_text
 from pretix.helpers.urls import build_absolute_uri as build_global_uri
 from pretix.multidomain.urlreverse import build_absolute_uri
 from urllib.parse import urlencode
-from django.template.loader import get_template
 
 from .constants import (
     PAYMENT_STATUS_SUCCESS,
@@ -42,7 +41,7 @@ from .constants import (
     SUPPORTED_CURRENCIES,
     X_API_VERSION,
 )
-from .models import PaymentAttempt, PaymentWebhookEvent, CashfreePaymentInfo
+from .models import CashfreePaymentInfo, PaymentAttempt, PaymentWebhookEvent
 
 logger = logging.getLogger("pretix.plugins.cashfree")
 
@@ -165,8 +164,8 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
             if not api_response or not api_response.data:
                 raise Exception("Cashfree order creation failed")
-            
-            order_entity = api_response.data            
+
+            order_entity = api_response.data
             payment.info_data = self._create_payment_info(x_request_id, order_entity)
             payment.save()
             return self._redirect_cashfree(request, payment, order_entity)
@@ -180,7 +179,9 @@ class CashfreePaymentProvider(BasePaymentProvider):
             raise PaymentException from e
 
     def _create_payment_info(self, x_request_id, order_entity: OrderEntity):
-        obj = CashfreePaymentInfo(x_request_id=x_request_id, order_id=order_entity.order_id)
+        obj = CashfreePaymentInfo(
+            x_request_id=x_request_id, order_id=order_entity.order_id
+        )
         return obj.dict()
 
     def _redirect_cashfree(
@@ -260,7 +261,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
     def payment_is_valid_session(self, request):
         return True
-    
+
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         """
         Redirect to Cashfree to collect payment
@@ -283,7 +284,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
         # Otherwise create a new Cashfree order and redirect
         return self._create_cashfree_order(request, payment)
-    
 
     def verify_payment(self, payment: OrderPayment):
         """
@@ -392,10 +392,9 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
         return OrderedDict(fields)
 
-    def payment_control_render(self, request, payment):        
+    def payment_control_render(self, request, payment):
         template = get_template("pretix_cashfree/payment_control.html")
         obj = CashfreePaymentInfo.parse_obj(payment.info_data)
-        return template.render({
-            "external_id": obj.order_id,
-            "request_id": obj.x_request_id
-        })
+        return template.render(
+            {"external_id": obj.order_id, "request_id": obj.x_request_id}
+        )
