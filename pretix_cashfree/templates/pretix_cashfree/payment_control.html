@@ -1,0 +1,43 @@
+{% load i18n %}
+
+<dl class='dl-horizontal'>
+    <dt><strong>{% trans "Request ID" %}</strong></dt>
+    <dd>
+        <span id="{{ payment_id }}_request_id" class="text-muted">{{ request_id }}</span>  
+        <button type="button" class="btn btn-default btn-xs btn-clipboard js-only" data-clipboard-target="#{{ payment_id }}_request_id" data-original-title="" title="">
+            <i class="fa fa-clipboard" aria-hidden="true"></i>
+            <span class="sr-only">Copy to clipboard</span>
+        </button>      
+    </dd>
+
+    <dt><strong>{% trans "Cashfree Ref." %}</strong></dt>
+    <dd>
+        <span id="{{ payment_id }}_order_id" class="text-muted">{{ external_id }}</span>  
+        <button type="button" class="btn btn-default btn-xs btn-clipboard js-only" data-clipboard-target="#{{ payment_id }}_order_id" data-original-title="" title="">
+            <i class="fa fa-clipboard" aria-hidden="true"></i>
+            <span class="sr-only">Copy to clipboard</span>
+        </button>   
+    </dd>
+
+    <dt><strong>{% trans "Updated At" %}</strong></dt>
+    <dd>{{ updated_at }}</dd>
+    
+    <dt><strong>{% trans "Payment Status" %}</strong></dt>
+    <dd>
+        {% if order_status == "ACTIVE" %}
+            <span class="label label-info">{{ order_status|lower }}</span>
+        {% elif order_status == "PAID" %}
+            <span class="label label-success">{{ order_status|lower }}</span>
+        {% elif order_status == "TERMINATED" %}
+            <span class="label label-danger">{{ order_status|lower }}</span>
+        {% elif order_status == "EXPIRED" %}
+            <span class="label label-default">{{ order_status|lower }}</span>
+        {% elif order_status == "TERMINATION_REQUESTED" %}
+            <span class="label label-warning">{{ order_status|lower }}</span>
+        {% else %}
+            <span class="label label-default">{{ order_status|lower }}</span>
+        {% endif %}
+    </dd>
+
+    
+</dl>
