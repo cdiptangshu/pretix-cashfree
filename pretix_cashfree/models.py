@@ -1,4 +1,5 @@
 from django.db import models
+from pydantic import BaseModel
 
 
 class PaymentAttempt(models.Model):
@@ -19,3 +20,8 @@ class PaymentWebhookEvent(models.Model):
     payment_status = models.CharField(max_length=50)
     payload = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+
+class CashfreePaymentInfo(BaseModel):
+    x_request_id: str
+    order_id: str
+    
