@@ -393,6 +393,10 @@ class CashfreePaymentProvider(BasePaymentProvider):
         return OrderedDict(fields)
 
     def payment_control_render(self, request, payment):
+        # Do not render control if payment info is missing
+        if not payment.info_data:
+            return super().payment_control_render(request, payment)
+
         template = get_template("pretix_cashfree/payment_control.html")
         obj = CashfreePaymentInfo.parse_obj(payment.info_data)
         return template.render(
