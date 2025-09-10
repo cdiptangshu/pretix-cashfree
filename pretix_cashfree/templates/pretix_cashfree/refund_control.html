@@ -1,0 +1,43 @@
+{% load i18n %}
+
+<dl class='dl-horizontal'>
+    <dt>{% trans "Request ID" %}</dt>
+    <dd>
+        <span id="{{ refund_id }}_request_id" class="text-muted">{{ x_request_id }}</span>  
+        <button type="button" class="btn btn-default btn-xs btn-clipboard js-only" data-clipboard-target="#{{ refund_id }}_request_id" data-original-title="" title="">
+            <i class="fa fa-clipboard" aria-hidden="true"></i>
+            <span class="sr-only">Copy to clipboard</span>
+        </button>      
+    </dd>
+
+    <dt>{% trans "Order ID" %}</dt>
+    <dd>
+        <span id="{{ refund_id }}_order_id" class="text-muted">{{ order_id }}</span>  
+        <button type="button" class="btn btn-default btn-xs btn-clipboard js-only" data-clipboard-target="#{{ refund_id }}_order_id" data-original-title="" title="">
+            <i class="fa fa-clipboard" aria-hidden="true"></i>
+            <span class="sr-only">Copy to clipboard</span>
+        </button>   
+    </dd>
+
+    <dt>{% trans "Updated At" %}</dt>
+    <dd>{{ updated_at }}</dd>
+    
+    <dt>{% trans "Status" %}</dt>
+    <dd>
+        {% if refund_status == "ACTIVE" %}
+            <span class="label label-info">{{ refund_status|lower }}</span>
+        {% elif refund_status == "PAID" %}
+            <span class="label label-success">{{ refund_status|lower }}</span>
+        {% elif refund_status == "TERMINATED" %}
+            <span class="label label-danger">{{ refund_status|lower }}</span>
+        {% elif refund_status == "EXPIRED" %}
+            <span class="label label-default">{{ refund_status|lower }}</span>
+        {% elif refund_status == "TERMINATION_REQUESTED" %}
+            <span class="label label-warning">{{ refund_status|lower }}</span>
+        {% else %}
+            <span class="label label-default">{{ refund_status|lower }}</span>
+        {% endif %}
+    </dd>
+
+    
+</dl>
