@@ -3,8 +3,10 @@ from cashfree_pg.api_client import Cashfree, PGWebhookEvent
 from cashfree_pg.exceptions import NotFoundException
 from cashfree_pg.models.create_order_request import CreateOrderRequest
 from cashfree_pg.models.customer_details import CustomerDetails
+from cashfree_pg.models.order_create_refund_request import OrderCreateRefundRequest
 from cashfree_pg.models.order_entity import OrderEntity
 from cashfree_pg.models.order_meta import OrderMeta
+from cashfree_pg.models.refund_entity import RefundEntity
 from collections import OrderedDict
 from datetime import datetime
 from decimal import Decimal
@@ -23,7 +25,7 @@ from pretix.base.forms.questions import (
     WrappedPhoneNumberPrefixWidget,
     guess_phone_prefix_from_request,
 )
-from pretix.base.models import Event, Order, OrderPayment
+from pretix.base.models import Event, Order, OrderPayment, OrderRefund
 from pretix.base.payment import BasePaymentProvider, PaymentException
 from pretix.base.settings import SettingsSandbox
 from pretix.base.templatetags.rich_text import rich_text
@@ -32,6 +34,7 @@ from pretix.multidomain.urlreverse import build_absolute_uri
 from urllib.parse import urlencode
 
 from .constants import (
+    DATE_FORMAT,
     PAYMENT_STATUS_SUCCESS,
     REDIRECT_URL_PAYMENT_SESSION_ID,
     RETURN_URL_PARAM,
@@ -42,7 +45,12 @@ from .constants import (
     SUPPORTED_CURRENCIES,
     X_API_VERSION,
 )
-from .models import CashfreePaymentInfo, PaymentAttempt, PaymentWebhookEvent
+from .models import (
+    CashfreePaymentInfo,
+    CashfreeRefundInfo,
+    PaymentAttempt,
+    PaymentWebhookEvent,
+)
 from .utils import create_request_id
 
 logger = logging.getLogger("pretix.plugins.cashfree")
@@ -161,11 +169,13 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
             x_request_id = create_request_id()
             api_response = Cashfree().PGCreateOrder(
-                X_API_VERSION, create_order_request, x_request_id
+                x_api_version=X_API_VERSION,
+                create_order_request=create_order_request,
+                x_request_id=x_request_id,
             )
 
             if not api_response or not api_response.data:
-                raise Exception("Cashfree order creation failed")
+                raise Exception("Did not receive order details")
 
             order_entity = api_response.data
             payment.info_data = self._create_payment_info(x_request_id, order_entity)
@@ -182,14 +192,38 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
     def _create_payment_info(self, x_request_id: str, order_entity: OrderEntity):
         local_dt = datetime.now()
-        updated_at = date_format(local_dt, "SHORT_DATETIME_FORMAT")
+        updated_at = date_format(local_dt, DATE_FORMAT)
         obj = CashfreePaymentInfo(
             x_request_id=x_request_id,
             order_id=order_entity.order_id,
+            cf_order_id=order_entity.cf_order_id,
             order_status=order_entity.order_status,
             order_currency=order_entity.order_currency,
             order_amount=order_entity.order_amount,
             customer_id=order_entity.customer_details.customer_id,
+            updated_at=updated_at,
+        )
+        return obj.dict()
+
+    def _create_refund_info(self, x_request_id: str, refund_entity: RefundEntity):
+        local_dt = datetime.now()
+        updated_at = date_format(local_dt, DATE_FORMAT)
+        date = (
+            date_format(refund_entity.processed_at, DATE_FORMAT)
+            if refund_entity.processed_at
+            else None
+        )
+        logger.debug("processed at date: %s", date)
+        obj = CashfreeRefundInfo(
+            x_request_id=x_request_id,
+            order_id=refund_entity.order_id,
+            cf_refund_id=refund_entity.cf_refund_id,
+            cf_payment_id=refund_entity.cf_payment_id,
+            refund_type=refund_entity.refund_type,
+            refund_status=refund_entity.refund_status,
+            refund_amount=refund_entity.refund_amount,
+            refund_currency=refund_entity.refund_currency,
+            processed_at=refund_entity.processed_at,
             updated_at=updated_at,
         )
         return obj.dict()
@@ -282,18 +316,16 @@ class CashfreePaymentProvider(BasePaymentProvider):
         """
         Redirect to Cashfree to collect payment
         """
-        next_page = super().execute_payment(request, payment)
-
         # If already confirmed, go to order details
         if self._is_payment_confirmed(payment):
-            return next_page
+            return None
 
         # First check existing payment status
         order_entity = self.verify_payment(payment)
         if order_entity:
             # If confirmed, go to order details. Otherwise redirect to Cashfree with existing payment_session_id
             return (
-                next_page
+                None
                 if self._is_payment_confirmed(payment)
                 else self._redirect_cashfree(request, payment, order_entity)
             )
@@ -324,7 +356,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
             logger.debug("Cashfree order not found for payment: %s", payment)
             return None
         except Exception as e:
-            logger.exception(
+            logger.e(
                 "Error occured while fetching Cashfree order having id: %s", order_id
             )
             raise PaymentException from e
@@ -416,19 +448,53 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def payment_control_render(self, request, payment):
         # Do not render control if payment info is missing
         if not payment.info_data:
-            return super().payment_control_render(request, payment)
-
+            return None
         template = get_template("pretix_cashfree/payment_control.html")
-        obj = CashfreePaymentInfo.parse_obj(payment.info_data)
-        return template.render(
-            {
-                "payment_id": payment.full_id,
-                "external_id": obj.order_id,
-                "request_id": obj.x_request_id,
-                "customer_id": obj.customer_id,
-                "order_status": obj.order_status,
-                "order_currency": obj.order_currency,
-                "order_amount": obj.order_amount,
-                "updated_at": obj.updated_at,
-            }
+        return template.render(payment.info_data)
+
+    def payment_refund_supported(self, payment):
+        return True
+
+    def payment_partial_refund_supported(self, payment):
+        return False
+
+    def execute_refund(self, refund: OrderRefund):
+
+        order_id = refund.order.full_code
+
+        logger.debug("Creating a refund for order_id: %s", order_id)
+
+        create_refund_request = OrderCreateRefundRequest(
+            refund_id=refund.full_id,
+            refund_amount=float(refund.amount),
+            refund_note=refund.comment,
         )
+        x_request_id = create_request_id()
+
+        try:
+            api_response = Cashfree().PGOrderCreateRefund(
+                x_api_version=X_API_VERSION,
+                order_id=order_id,
+                order_create_refund_request=create_refund_request,
+                x_request_id=x_request_id,
+            )
+
+            if not api_response or not api_response.data:
+                raise Exception("Did not receive refund details")
+
+            refund.info_data = self._create_refund_info(
+                x_request_id=x_request_id, refund_entity=api_response.data
+            )
+            refund.save()
+            refund.done()
+
+        except Exception as e:
+            logger.error("Error occurred: %s", e)
+            raise PaymentException from e
+
+    def refund_control_render(self, request, refund):
+        # Do not render control if refund info is missing
+        if not refund.info_data:
+            return None
+        template = get_template("pretix_cashfree/refund_control.html")
+        return template.render(refund.info_data)
