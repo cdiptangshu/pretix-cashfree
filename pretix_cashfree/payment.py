@@ -395,9 +395,9 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def checkout_confirm_render(
         self, request: HttpRequest, order: Order = None, info_data: dict = None
     ):
-        return mark_safe(
-            f"<p>Payment Phone: {request.session[self.payment_phone_session_key]}</p><p>You will be redirected to Cashfree to make the payment</p>"
-        )
+        payment_phone = request.session[self.payment_phone_session_key]
+        template = get_template("pretix_cashfree/checkout_confirm.html")
+        return template.render({"payment_phone": payment_phone})
 
     def test_mode_message(self):
         return mark_safe(
@@ -437,20 +437,18 @@ class CashfreePaymentProvider(BasePaymentProvider):
                 PhoneNumberField(
                     label=_("Phone number"),
                     required=True,
-                    help_text=rich_text(self.event.settings.checkout_phone_helptext),
+                    help_text=rich_text(
+                        _("Payment alerts would be sent to this phone number")
+                    ),
                     widget=WrappedPhoneNumberPrefixWidget(),
                 ),
             )
         ]
-
         return OrderedDict(fields)
 
     def payment_control_render(self, request, payment):
-        # Do not render control if payment info is missing
-        if not payment.info_data:
-            return None
         template = get_template("pretix_cashfree/payment_control.html")
-        return template.render(payment.info_data)
+        return template.render({"payment_info": payment.info_data})
 
     def payment_refund_supported(self, payment):
         return True
@@ -493,8 +491,5 @@ class CashfreePaymentProvider(BasePaymentProvider):
             raise PaymentException from e
 
     def refund_control_render(self, request, refund):
-        # Do not render control if refund info is missing
-        if not refund.info_data:
-            return None
         template = get_template("pretix_cashfree/refund_control.html")
-        return template.render(refund.info_data)
+        return template.render({"refund_info": refund.info_data})

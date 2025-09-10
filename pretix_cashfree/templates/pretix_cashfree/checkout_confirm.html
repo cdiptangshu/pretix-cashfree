@@ -1,0 +1,17 @@
+{% load i18n %}
+{% load static %}
+
+
+<img src="{% static 'pretix_cashfree/images/CF_Logo_dark-WhiteBG.svg' %}" alt="Cashfree logo" width="200">
+
+{% if payment_phone %}
+    <dl class="dl-horizontal">
+        <dt>{% trans "Phone number" %}</dt>
+        <dd class="force-ltr">{{ payment_phone.as_international }}</dd>
+    </dl>
+{% endif %}
+<p class="text-muted">
+    {% blocktrans trimmed %}
+        You will be redirected to make the payment.
+    {% endblocktrans %}
+</p>
