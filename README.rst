@@ -1,9 +1,14 @@
 Cashfree
 ==========================
 
-This is a plugin for `pretix`_. 
+A Pretix plugin that enables payments through the `Cashfree`_ payment gateway.  
+This plugin allows organizers to accept online payments via Cashfree while using `pretix`_ for ticketing and event management.
 
-Cashfree PG
+Features
+--------
+
+- Seamless integration of Cashfree with Pretix checkout
+- Supports UPI payments for India
 
 Development setup
 -----------------
@@ -51,3 +56,4 @@ Released under the terms of the Apache License 2.0
 
 .. _pretix: https://github.com/pretix/pretix
 .. _pretix development setup: https://docs.pretix.eu/en/latest/development/setup.html
+.. _Cashfree: https://www.cashfree.com/
