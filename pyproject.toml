@@ -30,7 +30,7 @@ requires = [
 
 [project.urls]
 homepage = "GitHub repository URL"
-repository = "GitHub repository URL"
+repository = "https://github.com/cdiptangshu/pretix-cashfree"
 
 [tool.setuptools]
 include-package-data = true
