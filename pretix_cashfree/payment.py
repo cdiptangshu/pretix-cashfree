@@ -58,8 +58,8 @@ logger = logging.getLogger("pretix.plugins.cashfree")
 
 class CashfreePaymentProvider(BasePaymentProvider):
     identifier = "cashfree"
-    verbose_name = _("Cashfree")
-    public_name = _("Cashfree")
+    verbose_name = "Cashfree"
+    public_name = "Cashfree"
 
     def __init__(self, event: Event):
         super().__init__(event)
