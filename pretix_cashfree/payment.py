@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 from django import forms
 from django.contrib import messages
-from django.db.utils import IntegrityError
+from django.core.cache import caches
 from django.http import HttpRequest
 from django.template.loader import get_template
 from django.urls import reverse
@@ -49,11 +49,15 @@ from .models import (
     CashfreePaymentInfo,
     CashfreeRefundInfo,
     PaymentAttempt,
-    PaymentWebhookEvent,
 )
 from .utils import create_request_id
 
 logger = logging.getLogger("pretix.plugins.cashfree")
+
+try:
+    cache = caches["redis"]
+except Exception:
+    cache = caches["default"]
 
 
 class CashfreePaymentProvider(BasePaymentProvider):
@@ -106,7 +110,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
         """
         Configure Cashfree API credentials
         """
-        logger.debug("Initializing Cashfree")
         is_sandbox = self.event.testmode
         Cashfree.XClientId = (
             SANDBOX_CLIENT_KEY if is_sandbox else self.settings.client_id
@@ -284,21 +287,15 @@ class CashfreePaymentProvider(BasePaymentProvider):
         cf_payment_id = str(cf_payment_obj["cf_payment_id"])
         payment_status = cf_payment_obj["payment_status"]
 
-        try:
-            # Log the webhook event
-            PaymentWebhookEvent.objects.create(
-                cf_payment_id=cf_payment_id,
-                order_code=payment.order.code,
-                payment_local_id=payment.local_id,
-                payment_status=payment_status,
-                payload=webhook_event.raw,
-            )
-        except IntegrityError:
+        key = f"plugins:pretix_cachfree:webhook:payment:{cf_payment_id}"
+        if cache.has_key(key=key):
             logger.debug(
-                "Webhook already processed with cf_payment_id: %s, aborting.",
+                "Webhook payload with cf_payment_id: %s already processed. Skipping...",
                 cf_payment_id,
             )
-            return False
+            return True
+
+        cache.set(key=key, value=webhook_event.raw)
 
         # Verify the payment if Cashfree reports it as successful
         return payment_status == PAYMENT_STATUS_SUCCESS

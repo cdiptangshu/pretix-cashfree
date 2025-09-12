@@ -15,15 +15,6 @@ class PaymentAttempt(models.Model):
     )
 
 
-class PaymentWebhookEvent(models.Model):
-    cf_payment_id = models.CharField(max_length=50, db_index=True, unique=True)
-    order_code = models.CharField(max_length=50)
-    payment_local_id = models.CharField(max_length=50)
-    payment_status = models.CharField(max_length=50)
-    payload = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-
-
 class CashfreePaymentInfo(BaseModel):
     x_request_id: str
     order_id: str
