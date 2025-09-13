@@ -52,7 +52,7 @@ def return_view(request, *args, **kwargs):
 
     if request.session.get(SESSION_KEY_ORDER_ID):
         cashfree_object = PaymentAttempt.objects.get(
-            order_id=request.session.get(SESSION_KEY_ORDER_ID)
+            reference=request.session.get(SESSION_KEY_ORDER_ID)
         )
         payment = cashfree_object.payment
     else:
@@ -129,7 +129,7 @@ def webhook_view(request: HttpRequest, *args, **kwargs):
         return HttpResponse(status=400)
 
     try:
-        cashfree_object = PaymentAttempt.objects.get(order_id=order_id)
+        cashfree_object = PaymentAttempt.objects.get(reference=order_id)
         prov = CashfreePaymentProvider(cashfree_object.payment.order.event)
 
     except PaymentAttempt.DoesNotExist:
