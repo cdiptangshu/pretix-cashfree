@@ -21,6 +21,7 @@ jobs:
         uses: actions/setup-python@v1
         with:
           python-version: 3.11
+      
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -28,15 +29,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       
-      - name: Install system dependencies
-        run: sudo apt update && sudo apt install gettext
+      - name: Install build dependencies
+        run: |
+          sudo apt update && sudo apt install gettext
+          python -m pip install --upgrade pip build twine
+          pip install build twine
       
-      - name: Install pretix
-        run: pip3 install pretix
-      
-      - name: Install Dependencies
-        run: pip3 install pytest pytest-django -Ue .
-
       - name: Build package
         run: python -m build
 
