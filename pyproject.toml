@@ -1,7 +1,7 @@
 [project]
 name = "pretix-cashfree"
 dynamic = ["version"]
-description = "Cashfree Payment Gateway"
+description = "Pretix plugin for accepting payments via Cashfree."
 readme = "README.rst"
 license = {text = "Apache"}
 keywords = ["pretix"]
@@ -29,7 +29,7 @@ requires = [
 ]
 
 [project.urls]
-homepage = "GitHub repository URL"
+homepage = "https://github.com/cdiptangshu/pretix-cashfree"
 repository = "https://github.com/cdiptangshu/pretix-cashfree"
 
 [tool.setuptools]
