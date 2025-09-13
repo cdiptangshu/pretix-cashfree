@@ -1,7 +1,7 @@
 [project]
 name = "pretix-cashfree"
 dynamic = ["version"]
-description = "Cashfree Payment Gateway"
+description = "Pretix plugin for accepting payments via Cashfree."
 readme = "README.rst"
 license = {text = "Apache"}
 keywords = ["pretix"]
