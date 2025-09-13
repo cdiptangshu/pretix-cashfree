@@ -29,7 +29,7 @@ requires = [
 ]
 
 [project.urls]
-homepage = "GitHub repository URL"
+homepage = "https://github.com/cdiptangshu/pretix-cashfree"
 repository = "https://github.com/cdiptangshu/pretix-cashfree"
 
 [tool.setuptools]
