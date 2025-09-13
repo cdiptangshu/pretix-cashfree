@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 
 class PaymentAttempt(models.Model):
-    order_id = models.CharField(max_length=190, db_index=True, unique=True)
+    reference = models.CharField(max_length=190, db_index=True, unique=True)
     payment = models.ForeignKey(
         "pretixbase.OrderPayment",
         null=True,

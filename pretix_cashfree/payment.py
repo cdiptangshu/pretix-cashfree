@@ -237,7 +237,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         logger.debug("Redirecting to Cashfree for payment: %s", payment)
         request.session[SESSION_KEY_ORDER_ID] = order_entity.order_id
         PaymentAttempt.objects.update_or_create(
-            order_id=order_entity.order_id, defaults={"payment": payment}
+            reference=order_entity.order_id, defaults={"payment": payment}
         )
         return self._build_redirect_url(request, order_entity.payment_session_id)
 
