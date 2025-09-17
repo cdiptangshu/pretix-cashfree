@@ -29,6 +29,7 @@ class CashfreePaymentInfo(BaseModel):
 class CashfreeRefundInfo(BaseModel):
     x_request_id: str
     order_id: str
+    refund_id: str
     cf_refund_id: str
     cf_payment_id: str
     refund_type: str
