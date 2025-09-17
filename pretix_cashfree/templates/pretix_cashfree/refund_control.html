@@ -10,6 +10,15 @@
             </button>      
         </dd>
 
+        <dt>{% trans "Refund ID" %}</dt>
+        <dd>
+            <span id="{{ refund_info.refund_id }}_refund_id" class="text-muted">{{ refund_info.refund_id }}</span>  
+            <button type="button" class="btn btn-default btn-xs btn-clipboard js-only" data-clipboard-target="#{{ refund_info.refund_id }}_refund_id" data-original-title="" title="">
+                <i class="fa fa-clipboard" aria-hidden="true"></i>
+                <span class="sr-only">{% trans "Copy to clipboard" %}</span>
+            </button>   
+        </dd>
+
         <dt>{% trans "Order ID" %}</dt>
         <dd>
             <span id="{{ refund_info.refund_id }}_order_id" class="text-muted">{{ refund_info.order_id }}</span>  

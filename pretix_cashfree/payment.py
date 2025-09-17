@@ -220,6 +220,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         obj = CashfreeRefundInfo(
             x_request_id=x_request_id,
             order_id=refund_entity.order_id,
+            refund_id=refund_entity.refund_id,
             cf_refund_id=refund_entity.cf_refund_id,
             cf_payment_id=refund_entity.cf_payment_id,
             refund_type=refund_entity.refund_type,
@@ -259,11 +260,6 @@ class CashfreePaymentProvider(BasePaymentProvider):
                 payment.fail()
             case "TERMINATION_REQUESTED":
                 logger.debug("%s termination requested", payment)
-
-        payment.info_data = self._create_payment_info(
-            x_request_id=x_request_id, order_entity=order_entity
-        )
-        payment.save()
 
     def _is_payment_confirmed(self, payment):
         return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
@@ -317,7 +313,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         if self._is_payment_confirmed(payment):
             return None
 
-        # First check existing payment status
+        # Check existing payment status
         order_entity = self.verify_payment(payment)
         if order_entity:
             # If confirmed, go to order details. Otherwise redirect to Cashfree with existing payment_session_id
@@ -345,8 +341,13 @@ class CashfreePaymentProvider(BasePaymentProvider):
                 order_id=order_id,
                 x_request_id=x_request_id,
             )
-            order_entity: OrderEntity = api_response.data
+
+            order_entity = api_response.data
             self._handle_cashfree_order_status(x_request_id, payment, order_entity)
+            payment.info_data = self._create_payment_info(
+                x_request_id=x_request_id, order_entity=order_entity
+            )
+            payment.save()
             return order_entity
 
         except NotFoundException:
@@ -490,3 +491,9 @@ class CashfreePaymentProvider(BasePaymentProvider):
     def refund_control_render(self, request, refund):
         template = get_template("pretix_cashfree/refund_control.html")
         return template.render({"refund_info": refund.info_data})
+
+    def matching_id(self, payment):
+        return CashfreePaymentInfo(**payment.info_data).x_request_id
+
+    def refund_matching_id(self, refund):
+        return CashfreeRefundInfo(**refund.info_data).x_request_id
