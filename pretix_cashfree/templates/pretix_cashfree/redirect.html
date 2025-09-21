@@ -1,46 +1,20 @@
-{% load compress %}
+{% extends "pretixpresale/base.html" %}
 {% load i18n %}
 {% load static %}
-{% load thumb %}
-<!DOCTYPE html>
-<html{% if rtl %} dir="rtl" class="rtl"{% endif %} lang="{{ html_locale }}">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block thetitle %}{% endblock %}</title>
-    {% compress css file presale %}
-        <link rel="stylesheet" type="text/x-scss" href="{% static "pretixpresale/scss/main.scss" %}"/>
-    {% endcompress %}
-    {% if css_theme %}
-        <link rel="stylesheet" type="text/css" href="{{ css_theme }}" />
-    {% endif %}
-    <meta name="theme-color" content="{{ settings.primary_color|default:"#3b1c4a" }}">
-    {% compress js %}
-        <script type="text/javascript" src="{% static "jquery/js/jquery-3.6.4.min.js" %}"></script>
-    {% endcompress %}
-    <script type="text/javascript" src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-    {% if settings.favicon %}
-        <link rel="icon" href="{{ settings.favicon|thumb:'16x16^' }}">
-        <link rel="shortcut icon" href="{{ settings.favicon|thumb:'16x16^' }}">
-        <link rel="icon" type="image/png" sizes="16x16" href="{{ settings.favicon|thumb:'16x16^' }}">
-        <link rel="icon" type="image/png" sizes="32x32" href="{{ settings.favicon|thumb:'32x32^' }}">
-        <link rel="icon" type="image/png" sizes="192x192" href="{{ settings.favicon|thumb:'192x192^' }}">
-        <link rel="apple-touch-icon" sizes="180x180" href="{{ settings.favicon|thumb:'180x180^' }}">
-    {% elif development_warning or debug_warning %}
-        <link rel="shortcut icon" href="{% static "pretixbase/img/favicon-debug.ico" %}">
-    {% else %}
-        <link rel="icon" href="{% static "pretixbase/img/favicon.ico" %}">
-        <link rel="shortcut icon" href="{% static "pretixbase/img/favicon.ico" %}">
-        <link rel="icon" type="image/png" sizes="16x16" href="{% static "pretixbase/img/icons/favicon-16x16.png" %}">
-        <link rel="icon" type="image/png" sizes="32x32" href="{% static "pretixbase/img/icons/favicon-32x32.png" %}">
-        <link rel="icon" type="image/png" sizes="192x192" href="{% static "pretixbase/img/icons/android-chrome-192x192.png" %}">
-        <link rel="apple-touch-icon" sizes="180x180" href="{% static "pretixbase/img/icons/apple-touch-icon.png" %}">
-    {% endif %}
-</head>
-<body>
-    <div class="container text-center item-center">
+{% block thetitle %}    
+    {% trans "Redirect to Cashfree" %} :: {{ event.name }}
+{% endblock %}
+{% block custom_header %}
+    {{ block.super }}
+    <script type="text/javascript" src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>    
+{% endblock %}
+{% block page %}
+    <div class="text-center">
+        <i class="fa fa-cog big-rotating-icon"></i>
+    </div>
+    <div class="text-center item-center">
         <h2>{% trans "You are being redirected to the Cashfree payment page..." %}</h2>
-        <p>{% trans "If you are not redirected automatically, click the button below" %}</p>
+        <p>{% trans "If you are not redirected automatically after 3 seconds, click the button below" %}</p>
         <button id="redirect-btn" class="btn btn-primary btn-lg">Pay Now</button>        
     </div>
     <script>
@@ -56,16 +30,12 @@
                 };
                 cashfree.checkout(checkoutOptions);
             }
-
-            // Auto redirect after 3 seconds
-            setTimeout(doRedirect, 3000);
-
-            // Manual redirect on button click
+            // setTimeout(doRedirect, 3000);
             $("#redirect-btn").on("click", (event) => {
                 event.preventDefault();
                 doRedirect();
             });
         });                
     </script>
-</body>
-</html>
+{% endblock %}
+
