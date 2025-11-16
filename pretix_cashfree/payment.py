@@ -112,10 +112,14 @@ class CashfreePaymentProvider(BasePaymentProvider):
         """
         is_sandbox = self.event.testmode
         Cashfree.XClientId = (
-            SANDBOX_CLIENT_KEY if is_sandbox else self.settings.client_id
+            SANDBOX_CLIENT_KEY
+            if is_sandbox
+            else (self.settings.client_id or SANDBOX_CLIENT_KEY)
         )
         Cashfree.XClientSecret = (
-            SANDBOX_CLIENT_SECRET if is_sandbox else self.settings.client_secret
+            SANDBOX_CLIENT_SECRET
+            if is_sandbox
+            else (self.settings.client_secret or SANDBOX_CLIENT_SECRET)
         )
         Cashfree.XEnvironment = (
             Cashfree.XSandbox if is_sandbox else Cashfree.XProduction
@@ -243,7 +247,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
         return self._build_redirect_url(request, order_entity.payment_session_id)
 
     def _handle_cashfree_order_status(
-        self, x_request_id: str, payment: OrderPayment, order_entity: OrderEntity
+        self, payment: OrderPayment, order_entity: OrderEntity
     ):
         match order_entity.order_status:
             case "ACTIVE":
@@ -343,7 +347,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
             )
 
             order_entity = api_response.data
-            self._handle_cashfree_order_status(x_request_id, payment, order_entity)
+            self._handle_cashfree_order_status(payment, order_entity)
             payment.info_data = self._create_payment_info(
                 x_request_id=x_request_id, order_entity=order_entity
             )
@@ -354,9 +358,10 @@ class CashfreePaymentProvider(BasePaymentProvider):
             logger.debug("Cashfree order not found for payment: %s", payment)
             return None
         except Exception as e:
-            logger.e(
+            logger.debug(
                 "Error occured while fetching Cashfree order having id: %s", order_id
             )
+            logger.error(e)
             raise PaymentException from e
 
     def handle_webhook(self, raw_payload, signature, timestamp, payment: OrderPayment):
@@ -371,7 +376,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
             self.verify_payment(payment)
 
     def checkout_prepare(self, request, cart):
-        # HACK The following method validats payment form and copies the form values to the session.
+        # HACK The following method call validats payment form and copies the form values to the session.
         if not super().checkout_prepare(request, cart):
             return False
 
@@ -409,21 +414,22 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
     def payment_form_render(self, request, total, order: Order = None):
 
-        phone = (
-            str(order.phone)
-            if order
-            else (
-                next(iter((request.session.get("carts") or {}).values()), {})
-                .get("contact_form_data", {})
-                .get("phone")
+        if not request.session[self.payment_phone_session_key]:
+            phone = (
+                str(order.phone)
+                if order
+                else (
+                    next(iter((request.session.get("carts") or {}).values()), {})
+                    .get("contact_form_data", {})
+                    .get("phone")
+                )
             )
-        )
-        phone_prefix = guess_phone_prefix_from_request(request, self.event)
-        request.session[self.payment_phone_session_key] = (
-            PhoneNumber().from_string(phone)
-            if phone
-            else "+{}.".format(phone_prefix) if phone_prefix else None
-        )
+            phone_prefix = guess_phone_prefix_from_request(request, self.event)
+            request.session[self.payment_phone_session_key] = (
+                PhoneNumber().from_string(phone)
+                if phone
+                else "+{}.".format(phone_prefix) if phone_prefix else None
+            )
         return super().payment_form_render(request, total, order)
 
     @property
