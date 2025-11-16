@@ -38,8 +38,6 @@ from .constants import (
     PAYMENT_STATUS_SUCCESS,
     REDIRECT_URL_PAYMENT_SESSION_ID,
     RETURN_URL_PARAM,
-    SANDBOX_CLIENT_KEY,
-    SANDBOX_CLIENT_SECRET,
     SESSION_KEY_ORDER_ID,
     SUPPORTED_COUNTRY_CODES,
     SUPPORTED_CURRENCIES,
@@ -77,14 +75,14 @@ class CashfreePaymentProvider(BasePaymentProvider):
                 "client_id",
                 forms.CharField(
                     label=_("Client ID"),
-                    required=False,
+                    required=True,
                 ),
             ),
             (
                 "client_secret",
                 forms.CharField(
                     label=_("Client Secret"),
-                    required=False,
+                    required=True,
                     widget=forms.PasswordInput(render_value=True),
                 ),
             ),
@@ -111,16 +109,8 @@ class CashfreePaymentProvider(BasePaymentProvider):
         Configure Cashfree API credentials
         """
         is_sandbox = self.event.testmode
-        Cashfree.XClientId = (
-            SANDBOX_CLIENT_KEY
-            if is_sandbox
-            else (self.settings.client_id or SANDBOX_CLIENT_KEY)
-        )
-        Cashfree.XClientSecret = (
-            SANDBOX_CLIENT_SECRET
-            if is_sandbox
-            else (self.settings.client_secret or SANDBOX_CLIENT_SECRET)
-        )
+        Cashfree.XClientId = self.settings.client_id
+        Cashfree.XClientSecret = self.settings.client_secret
         Cashfree.XEnvironment = (
             Cashfree.XSandbox if is_sandbox else Cashfree.XProduction
         )
