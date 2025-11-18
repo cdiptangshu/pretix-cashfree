@@ -404,7 +404,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
 
     def payment_form_render(self, request, total, order: Order = None):
 
-        if not request.session[self.payment_phone_session_key]:
+        if not request.session.get(self.payment_phone_session_key):
             phone = (
                 str(order.phone)
                 if order
