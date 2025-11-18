@@ -410,15 +410,16 @@ class CashfreePaymentProvider(BasePaymentProvider):
                     return phone
 
     def payment_form_render(self, request, total, order: Order = None):
-        phone = str(order.phone) if order else self._extract_phone_from_session(request)
-        phone_prefix = guess_phone_prefix_from_request(request, self.event)
-        request.session[self.payment_phone_session_key] = (
-            PhoneNumber().from_string(phone)
-            if phone
-            else "+{}.".format(phone_prefix) if phone_prefix else None
-        )
-
-        logger.debug(request.session[self.payment_phone_session_key])
+        if not request.session.get(self.payment_phone_session_key):
+            phone = (
+                str(order.phone) if order else self._extract_phone_from_session(request)
+            )
+            phone_prefix = guess_phone_prefix_from_request(request, self.event)
+            request.session[self.payment_phone_session_key] = (
+                PhoneNumber().from_string(phone)
+                if phone
+                else "+{}.".format(phone_prefix) if phone_prefix else None
+            )
         return super().payment_form_render(request, total, order)
 
     @property
