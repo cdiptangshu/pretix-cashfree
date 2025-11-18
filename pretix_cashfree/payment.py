@@ -75,14 +75,14 @@ class CashfreePaymentProvider(BasePaymentProvider):
                 "client_id",
                 forms.CharField(
                     label=_("Client ID"),
-                    required=True,
+                    required=False,
                 ),
             ),
             (
                 "client_secret",
                 forms.CharField(
                     label=_("Client Secret"),
-                    required=True,
+                    required=False,
                     widget=forms.PasswordInput(render_value=True),
                 ),
             ),
@@ -109,8 +109,22 @@ class CashfreePaymentProvider(BasePaymentProvider):
         Configure Cashfree API credentials
         """
         is_sandbox = self.event.testmode
-        Cashfree.XClientId = self.settings.client_id
-        Cashfree.XClientSecret = self.settings.client_secret
+        client_id = self.settings.client_id or self.settings.global_client_id
+        if not client_id:
+            raise PaymentException(
+                "Cashfree Client ID is not configured. Please set it in the plugin settings."
+            )
+        Cashfree.XClientId = client_id
+
+        client_secret = (
+            self.settings.client_secret or self.settings.global_client_secret
+        )
+        if not client_secret:
+            raise PaymentException(
+                "Cashfree Client Secret is not configured. Please set it in the plugin settings."
+            )
+        Cashfree.XClientSecret = client_secret
+
         Cashfree.XEnvironment = (
             Cashfree.XSandbox if is_sandbox else Cashfree.XProduction
         )
