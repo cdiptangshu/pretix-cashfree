@@ -402,17 +402,17 @@ class CashfreePaymentProvider(BasePaymentProvider):
             )
         )
 
-    def payment_form_render(self, request, total, order: Order = None):
+    def _extract_phone_from_session(self, request):
+        for key, obj in request.session.get("carts").items():
+            if obj:
+                phone = obj.get("contact_form_data", {}).get("phone")
+                if phone:
+                    return phone
 
+    def payment_form_render(self, request, total, order: Order = None):
         if not request.session.get(self.payment_phone_session_key):
             phone = (
-                str(order.phone)
-                if order
-                else (
-                    next(iter((request.session.get("carts") or {}).values()), {})
-                    .get("contact_form_data", {})
-                    .get("phone")
-                )
+                str(order.phone) if order else self._extract_phone_from_session(request)
             )
             phone_prefix = guess_phone_prefix_from_request(request, self.event)
             request.session[self.payment_phone_session_key] = (
@@ -425,6 +425,7 @@ class CashfreePaymentProvider(BasePaymentProvider):
     @property
     def payment_form_fields(self):
         logger.debug("payment_form_fields() called")
+        logger.debug("+++++++++++++++++++++++++++++++++++++++++++")
         fields = [
             (
                 "phone",
